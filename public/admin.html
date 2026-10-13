@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Verwaltung Strassenjagd</title>
+<style>
+  :root {
+    --bg: #E7ECEF; --panel: #F6F8F9; --fg: #13202B; --muted: #586872; --line: #C9D2D8;
+    --ink: #13202B; --ink-fg: #F6F8F9; --good: #0B7A55; --bad: #B3341E;
+    --r0: #D55E00; --r1: #0072B2; --r2: #009E73; --r3: #CC79A7; color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0D1318; --panel: #17212A; --fg: #E6EDF2; --muted: #94A3AF; --line: #2A3843;
+      --ink: #E6EDF2; --ink-fg: #0D1318; --good: #2FC79A; --bad: #FF8A6B;
+      --r0: #FF8A3D; --r1: #4DA3E8; --r2: #2FC79A; --r3: #E58FC0; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.45 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  }
+  main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  h1 { margin: 0; font-size: 28px; text-transform: uppercase; line-height: 1.1; }
+  h2 { margin: 0 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button { font: inherit; height: 40px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--ink); color: var(--ink-fg); border-color: var(--ink); font-weight: 600; }
+  button.danger { border-color: var(--bad); color: var(--bad); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  input[type=text] { font: inherit; height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); min-width: 0; width: 100%; }
+  .runner { display: grid; gap: 8px; padding-block: 12px; border-top: 1px solid var(--line); }
+  .runner:first-of-type { border-top: 0; }
+  .nm { display: flex; align-items: center; gap: 10px; }
+  .sw { flex: none; width: 14px; height: 14px; border-radius: 50%; }
+  .kv { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; }
+  .kv span.k { color: var(--muted); font-size: 13px; }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; background: var(--bg); padding: 4px 6px; border-radius: 4px; border: 1px solid var(--line); }
+  .copy { height: 30px; padding: 0 10px; font-size: 13px; }
+  .stat { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  .msg { min-height: 1.4em; margin: 0; }
+  .ok { color: var(--good); } .err { color: var(--bad); }
+  @media (max-width: 560px) { .kv { grid-template-columns: minmax(0, 1fr) auto; } .kv span.k { grid-column: 1 / -1; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Verwaltung</h1>
+
+  <section class="card">
+    <h2>Spiel</h2>
+    <p id="status" class="msg">Lade …</p>
+    <div class="row">
+      <button class="primary" id="start">Spiel starten</button>
+      <button id="end">Spiel beenden</button>
+      <button class="danger" id="reset">Zurücksetzen</button>
+    </div>
+    <p id="msg" class="msg" role="status"></p>
+  </section>
+
+  <section class="card">
+    <h2>Läufer und Zugänge</h2>
+    <div id="runners"></div>
+    <div class="row"><button id="save">Namen speichern</button></div>
+  </section>
+
+  <section class="card">
+    <h2>Handy einrichten</h2>
+    <p style="margin-top:0"><b>Traccar Client</b> (App für iPhone und Android, läuft auch bei gesperrtem Bildschirm): «Geräte-Kennung» = Token, «Server-URL» = Adresse unten, Intervall 5 Sekunden, Genauigkeit «hoch».</p>
+    <div class="kv"><span class="k">Server-URL</span><code id="u-osmand"></code><button class="copy" data-copy="u-osmand">Kopieren</button></div>
+    <p><b>OwnTracks</b> (HTTP-Modus): Adresse mit Token pro Läufer siehe oben. <b>Ohne App:</b> den Link «Läufer-Seite» im Browser öffnen.</p>
+  </section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var key = new URLSearchParams(location.search).get('key') || '';
+  var COLORS = ['var(--r0)', 'var(--r1)', 'var(--r2)', 'var(--r3)'];
+  var origin = location.origin, resetArmed = false, names = [];
+  function $(id) { return document.getElementById(id); }
+  function say(t, cls) { $('msg').textContent = t || ''; $('msg').className = 'msg ' + (cls || ''); }
+  function api(path, body) {
+    return fetch('/api/admin/' + path + '?key=' + encodeURIComponent(key), body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || r.status); return j; }); });
+  }
+  function row(label, value, id) {
+    return '<span class="k">' + label + '</span><code id="' + id + '">' + value + '</code><button class="copy" data-copy="' + id + '">Kopieren</button>';
+  }
+  function render(info) {
+    var g = info.game;
+    $('status').textContent = g.status === 'waiting' ? 'Wartet auf den Start.' :
+      g.status === 'running' ? 'Läuft seit ' + new Date(g.startedAt).toLocaleString('de-CH') + '.' :
+      'Beendet am ' + new Date(g.endedAt).toLocaleString('de-CH') + '.';
+    $('start').disabled = g.status !== 'waiting'; $('end').disabled = g.status !== 'running';
+    $('u-osmand').textContent = origin + '/osmand';
+    if (!$('runners').children.length) {
+      $('runners').innerHTML = info.runners.map(function (r, i) {
+        return '<div class="runner"><div class="nm"><span class="sw" style="background:' + COLORS[i] + '"></span>' +
+          '<input type="text" id="name-' + i + '" maxlength="18" value="' + r.name.replace(/"/g, '&quot;') + '" aria-label="Name Läufer ' + (i + 1) + '"></div>' +
+          '<div class="kv">' + row('Token', r.token, 'tok-' + i) +
+          row('Läufer-Seite', origin + '/run?token=' + r.token, 'run-' + i) +
+          row('OwnTracks-URL', origin + '/owntracks?token=' + r.token, 'ot-' + i) + '</div>' +
+          '<div class="stat" id="stat-' + i + '"></div></div>';
+      }).join('');
+    }
+    info.runners.forEach(function (r, i) {
+      $('stat-' + i).textContent = r.meters.toLocaleString('de-CH') + ' m · ' + r.fixes + ' Positionen · abgewiesen: ' +
+        r.rejected.speed + ' zu schnell, ' + r.rejected.accuracy + ' zu ungenau';
+    });
+  }
+  function load() { return api('info').then(render).catch(function (e) { $('status').textContent = 'Fehler: ' + e.message + '. Stimmt der Schlüssel im Link?'; $('status').className = 'msg err'; }); }
+
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-copy]');
+    if (!b) return;
+    var t = $(b.getAttribute('data-copy')).textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { b.textContent = 'Kopiert'; }, function () {
+      var r = document.createRange(); r.selectNodeContents($(b.getAttribute('data-copy'))); var s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = 'Markiert';
+    });
+    setTimeout(function () { b.textContent = 'Kopieren'; }, 1500);
+  });
+  $('start').addEventListener('click', function () { api('start', {}).then(function () { say('Spiel gestartet.', 'ok'); return load(); }).catch(function (e) { say(e.message, 'err'); }); });
+  $('end').addEventListener('click', function () { api('end', {}).then(function () { say('Spiel beendet.', 'ok'); return load(); }).catch(function (e) { say(e.message, 'err'); }); });
+  $('reset').addEventListener('click', function () {
+    if (!resetArmed) { resetArmed = true; $('reset').textContent = 'Sicher? Alle Abschnitte werden gelöscht'; setTimeout(function () { resetArmed = false; $('reset').textContent = 'Zurücksetzen'; }, 5000); return; }
+    resetArmed = false; $('reset').textContent = 'Zurücksetzen';
+    api('reset', {}).then(function () { say('Zurückgesetzt.', 'ok'); return load(); }).catch(function (e) { say(e.message, 'err'); });
+  });
+  $('save').addEventListener('click', function () {
+    var n = [0, 1, 2, 3].map(function (i) { return $('name-' + i).value; });
+    api('names', { names: n }).then(function () { say('Namen gespeichert.', 'ok'); }).catch(function (e) { say(e.message, 'err'); });
+  });
+  load(); setInterval(load, 10000);
+})();
+</script>
+</body>
+</html>

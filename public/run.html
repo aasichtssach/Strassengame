@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#13202B">
+<title>Läufer-Seite Strassenjagd</title>
+<style>
+  :root {
+    --bg: #E7ECEF; --panel: #F6F8F9; --fg: #13202B; --muted: #586872; --line: #C9D2D8;
+    --ink: #13202B; --ink-fg: #F6F8F9; --good: #0B7A55; --bad: #B3341E; --rc: #0072B2;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0D1318; --panel: #17212A; --fg: #E6EDF2; --muted: #94A3AF; --line: #2A3843;
+      --ink: #E6EDF2; --ink-fg: #0D1318; --good: #2FC79A; --bad: #FF8A6B; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--fg);
+    font: 16px/1.45 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  }
+  main { max-width: 460px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  h1 { margin: 0; font-size: 28px; line-height: 1.1; text-transform: uppercase; letter-spacing: .01em; text-wrap: balance; }
+  .who { color: var(--muted); margin: 4px 0 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .big { font-size: 56px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .big small { font-size: 22px; color: var(--muted); margin-left: 4px; }
+  button {
+    font: inherit; height: 56px; border-radius: 8px; border: 1px solid var(--ink);
+    background: var(--ink); color: var(--ink-fg); font-weight: 600; font-size: 18px; cursor: pointer; width: 100%;
+  }
+  button.stop { background: transparent; color: var(--fg); border-color: var(--line); }
+  button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-variant-numeric: tabular-nums; }
+  dt { color: var(--muted); }
+  dd { margin: 0; text-align: right; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+  .ok { color: var(--good); } .warn { color: var(--bad); }
+  .hint { color: var(--muted); font-size: 14px; margin: 0; }
+  .banner { border-left: 4px solid var(--bad); padding: 8px 12px; background: var(--panel); border-radius: 4px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Strassenjagd Basel</h1>
+    <p class="who" id="who">Läufer-Seite</p>
+  </header>
+
+  <div class="card">
+    <div class="big"><span id="meters">0</span><small>m gesammelt</small></div>
+  </div>
+
+  <div class="banner" id="problem" hidden></div>
+
+  <button id="go">Tracking starten</button>
+
+  <div class="card">
+    <dl>
+      <dt>Spiel</dt><dd id="game">–</dd>
+      <dt>GPS-Genauigkeit</dt><dd id="acc">–</dd>
+      <dt>Gesendet</dt><dd id="sent">0</dd>
+      <dt>Letzte Antwort</dt><dd id="last">–</dd>
+    </dl>
+  </div>
+
+  <p class="hint">Lass diese Seite im Vordergrund offen und den Bildschirm an. Wenn dein Handy die Seite im Hintergrund anhält (vor allem iPhones), nimm stattdessen die App «Traccar Client», damit das Tracking auch bei gesperrtem Bildschirm läuft.</p>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var token = new URLSearchParams(location.search).get('token') || '';
+  var el = function (id) { return document.getElementById(id); };
+  var watchId = null, wakeLock = null, queue = [], sent = 0, lastSend = 0, sending = false, active = false;
+  var REASONS = {
+    ok: 'zählt', waiting: 'Spiel noch nicht gestartet', 'before-start': 'vor dem Start', speed: 'zu schnell, zählt nicht',
+    accuracy: 'GPS zu ungenau', old: 'schon bekannt', invalid: 'ungültig'
+  };
+
+  function problem(msg) { el('problem').hidden = !msg; el('problem').textContent = msg || ''; }
+  function status(g) {
+    el('game').textContent = g.status === 'running' ? 'läuft' : g.status === 'ended' ? 'beendet' : 'wartet auf Start';
+  }
+  function me() {
+    return fetch('/api/me?token=' + encodeURIComponent(token)).then(function (r) {
+      if (!r.ok) throw new Error('Token ungültig');
+      return r.json();
+    }).then(function (m) {
+      el('who').textContent = m.name; el('meters').textContent = m.meters.toLocaleString('de-CH'); status(m.game);
+    });
+  }
+  if (!token) problem('Es fehlt der Token im Link. Öffne den Link, den du vom Spielleiter bekommen hast.');
+  else me().catch(function (e) { problem(e.message + '. Bitte frag den Spielleiter nach dem richtigen Link.'); });
+  setInterval(function () { if (token) me().catch(function () {}); }, 15000);
+
+  function flush() {
+    if (sending || !queue.length) return;
+    sending = true;
+    var batch = queue.splice(0, 100);
+    fetch('/api/fix', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: token, fixes: batch }), keepalive: true })
+      .then(function (r) { if (!r.ok) throw new Error('Server ' + r.status); return r.json(); })
+      .then(function (res) {
+        sent += batch.length; el('sent').textContent = String(sent);
+        var last = res.results[res.results.length - 1];
+        el('last').textContent = REASONS[last] || last;
+        el('last').className = last === 'ok' ? 'ok' : (last === 'speed' || last === 'accuracy' ? 'warn' : '');
+        el('meters').textContent = res.me.meters.toLocaleString('de-CH'); status(res.me.game);
+        problem('');
+      })
+      .catch(function () { queue = batch.concat(queue).slice(0, 2000); problem('Keine Verbindung zum Server. Die Positionen werden nachgesendet.'); })
+      .then(function () { sending = false; });
+  }
+  setInterval(flush, 3000);
+
+  function onPos(p) {
+    el('acc').textContent = Math.round(p.coords.accuracy) + ' m';
+    el('acc').className = p.coords.accuracy <= 30 ? 'ok' : 'warn';
+    var t = Date.now();
+    if (t - lastSend < 3000) return;
+    lastSend = t;
+    queue.push({ lat: p.coords.latitude, lon: p.coords.longitude, t: p.timestamp, acc: p.coords.accuracy });
+    flush();
+  }
+  function onErr(e) {
+    problem(e.code === 1 ? 'Standortzugriff verweigert. Erlaube den Standort für diese Seite in den Browser-Einstellungen.' :
+      'Kein GPS-Signal. Geh nach draussen und warte einen Moment.');
+  }
+  function lock() {
+    if (!('wakeLock' in navigator)) return;
+    navigator.wakeLock.request('screen').then(function (w) { wakeLock = w; }).catch(function () {});
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && active) lock();
+    if (document.visibilityState === 'hidden' && active) problem('Die Seite war im Hintergrund, in der Zeit wurde nichts gesendet.');
+  });
+
+  el('go').addEventListener('click', function () {
+    if (!token) return;
+    if (!active) {
+      if (!navigator.geolocation) return problem('Dieser Browser kann den Standort nicht abfragen.');
+      watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+      active = true; lock();
+      el('go').textContent = 'Tracking beenden'; el('go').className = 'stop';
+    } else {
+      navigator.geolocation.clearWatch(watchId); active = false;
+      if (wakeLock) { try { wakeLock.release(); } catch (e) {} }
+      el('go').textContent = 'Tracking starten'; el('go').className = '';
+    }
+  });
+})();
+</script>
+</body>
+</html>

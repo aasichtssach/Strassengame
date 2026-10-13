@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Strassenjagd Basel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+  /* Layout: Vollbild-Karte links, Zählertafel rechts; auf dem Handy Karte oben, Tafel darunter */
+  :root {
+    --bg: #E7ECEF;
+    --panel: #F6F8F9;
+    --fg: #13202B;
+    --muted: #586872;
+    --line: #C9D2D8;
+    --map: #EEF1F2;
+    --water: #BCD5E5;
+    --road: #A3AEB6;
+    --label: #5A6B77;
+    --ink: #13202B;
+    --ink-fg: #F6F8F9;
+    --r0: #D55E00;
+    --r1: #0072B2;
+    --r2: #009E73;
+    --r3: #CC79A7;
+    --f-display: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+    --f-body: 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0D1318;
+      --panel: #17212A;
+      --fg: #E6EDF2;
+      --muted: #94A3AF;
+      --line: #2A3843;
+      --map: #111A21;
+      --water: #1A3850;
+      --road: #4B5A66;
+      --label: #8DA0AE;
+      --ink: #E6EDF2;
+      --ink-fg: #0D1318;
+      --r0: #FF8A3D;
+      --r1: #4DA3E8;
+      --r2: #2FC79A;
+      --r3: #E58FC0;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0D1318;
+    --panel: #17212A;
+    --fg: #E6EDF2;
+    --muted: #94A3AF;
+    --line: #2A3843;
+    --map: #111A21;
+    --water: #1A3850;
+    --road: #4B5A66;
+    --label: #8DA0AE;
+    --ink: #E6EDF2;
+    --ink-fg: #0D1318;
+    --r0: #FF8A3D;
+    --r1: #4DA3E8;
+    --r2: #2FC79A;
+    --r3: #E58FC0;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--f-body);
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  button, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+
+  .app {
+    height: 100%;
+    padding: 12px 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 12px;
+  }
+  .stage {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--map);
+  }
+  #map {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    cursor: grab;
+  }
+  #map:active { cursor: grabbing; }
+  .zoom {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 4px;
+  }
+  .zoom button {
+    min-width: 36px;
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    cursor: pointer;
+  }
+  .zoom button:hover { border-color: var(--muted); }
+  .livetag {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .livetag i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .livetag.on i { background: var(--r0); }
+
+  .board {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  h1 {
+    margin: 0;
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: 30px;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    text-wrap: balance;
+  }
+  .sub { margin: 6px 0 0; color: var(--muted); }
+
+  .clock {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    padding-block: 10px;
+    border-block: 1px solid var(--line);
+    font-variant-numeric: tabular-nums;
+  }
+  .clock b {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: 30px;
+    line-height: 1;
+  }
+  .clock .of { color: var(--muted); }
+  .clock .state { margin-left: auto; font-weight: 600; text-align: right; }
+
+  .runners {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+    gap: 8px;
+  }
+  .runner {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+  }
+  .runner.lead { border-color: var(--rc); box-shadow: inset 0 0 0 1px var(--rc); }
+  .runner .top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .runner .sw {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--rc);
+  }
+  .runner input {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 0;
+    border: 0;
+    border-bottom: 1px dashed transparent;
+    background: transparent;
+    font-weight: 600;
+  }
+  .runner input:hover, .runner input:focus { border-bottom-color: var(--muted); }
+  .runner .rank {
+    flex: none;
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .runner .m {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: 36px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .runner .m small {
+    margin-left: 3px;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .runner .bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--line);
+    overflow: hidden;
+  }
+  .runner .bar span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--rc);
+  }
+  .runner .pct { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  .free {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .free b { color: var(--fg); font-weight: 600; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .controls button {
+    height: 36px;
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    cursor: pointer;
+  }
+  .controls button:hover { border-color: var(--muted); }
+  .controls .primary {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--ink-fg);
+    font-weight: 600;
+    min-width: 84px;
+  }
+  .speed { display: flex; gap: 4px; margin-left: auto; }
+  .speed button { padding: 0 10px; min-width: 44px; }
+  .speed button[aria-pressed="true"] {
+    background: var(--fg);
+    border-color: var(--fg);
+    color: var(--bg);
+  }
+  .note { margin: 0; color: var(--muted); font-size: 12px; }
+
+  @media (max-width: 760px) {
+    .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+    .board { max-height: 48vh; padding: 12px; gap: 10px; }
+    h1 { font-size: 24px; }
+    .sub { display: none; }
+    .runner .m { font-size: 30px; }
+  }
+</style>
+
+</head>
+<body>
+<main class="app">
+  <section class="stage" aria-label="Live-Übersichtskarte">
+    <canvas id="map" role="img" aria-label="Karte von Basel mit den eroberten Strassenabschnitten der vier Läufer"></canvas>
+    <div class="livetag" id="livetag"><i></i><span id="livetext">Verbinde</span></div>
+    <div class="zoom">
+      <button id="zin" aria-label="Hineinzoomen">+</button>
+      <button id="zout" aria-label="Herauszoomen">&minus;</button>
+      <button id="zfit">Alles</button>
+    </div>
+  </section>
+
+  <aside class="board" aria-label="Zählertafel">
+    <header>
+      <h1>Strassenjagd Basel</h1>
+      <p class="sub">Wer einen Strassenabschnitt zuerst läuft, besitzt ihn.</p>
+    </header>
+
+    <div class="clock">
+      <b id="clock">0:00:00</b>
+      <span class="of" id="clocklabel">Spielzeit</span>
+      <span class="state" id="state"></span>
+    </div>
+
+    <ol class="runners" id="runners"></ol>
+
+    <div class="free"><span>Noch niemandem gehörend</span><b id="free"></b></div>
+
+    <p class="note">Positionen und Besitz erscheinen mit <span id="delay">30</span> s Verzögerung. Strassennetz: OpenStreetMap, <span id="netinfo"></span>.</p>
+  </aside>
+</main>
+<script src="/net.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var G = null;                       // Abschnitte (aus net.js)
+  var owner = null;                   // Besitzer je Abschnitt, -1 = niemand
+  var meters = [0, 0, 0, 0];
+  var runners = [{ name: 'Läufer 1' }, { name: 'Läufer 2' }, { name: 'Läufer 3' }, { name: 'Läufer 4' }];
+  var pos = [null, null, null, null]; // sichtbare Positionen {x, y, t}
+  var game = { status: 'waiting', startedAt: null, endedAt: null };
+  var delay = 30, offset = 0;         // offset = Serverzeit minus Gerätezeit
+  var connected = false, dirty = true;
+  var PLACES = [
+    ['Marktplatz', 47.5584, 7.5886], ['Bahnhof SBB', 47.5476, 7.5897],
+    ['Badischer Bahnhof', 47.5667, 7.6035], ['Messe Basel', 47.5642, 7.6202],
+    ['Münster', 47.5565, 7.5925], ['Zoo Basel', 47.5473, 7.5776], ['St. Jakob-Park', 47.5416, 7.6194]
+  ];
+  var places = [], bridgeLabels = [];
+
+  var canvas = document.getElementById('map');
+  var ctx = canvas.getContext('2d');
+  var W = 300, H = 300, dpr = 1;
+  var view = { cx: 0, cy: 0, k: 0.1 };
+  var kFit = 0.1, C = {}, sized = false;
+
+  function refreshColors() {
+    var cs = getComputedStyle(document.documentElement);
+    function g(n) { return cs.getPropertyValue(n).trim(); }
+    C = { map: g('--map'), road: g('--road'), label: g('--label'),
+      runner: [g('--r0'), g('--r1'), g('--r2'), g('--r3')] };
+    dirty = true;
+  }
+  function fit() {
+    var b = G.bounds;
+    view.cx = (b.x0 + b.x1) / 2; view.cy = (b.y0 + b.y1) / 2;
+    kFit = Math.min(W / ((b.x1 - b.x0) * 1.04), H / ((b.y1 - b.y0) * 1.04));
+    view.k = kFit; dirty = true;
+  }
+  function resize() {
+    var r = canvas.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = Math.max(1, r.width); H = Math.max(1, r.height);
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    if (G && !sized && r.width > 0) { fit(); sized = true; }
+    dirty = true;
+  }
+  function sx(x) { return (x - view.cx) * view.k + W / 2; }
+  function sy(y) { return H / 2 - (y - view.cy) * view.k; }
+  function now() { return Date.now() + offset; }
+
+  function drawLabel(text, x, y, size, weight) {
+    ctx.font = (weight || 600) + ' ' + (size || 11) + 'px Barlow, system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 3; ctx.strokeStyle = C.map; ctx.lineJoin = 'round';
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = C.label; ctx.fillText(text, x, y);
+  }
+  function tracePath(o) {
+    for (var c = 0; c < G.totalChunks; c++) {
+      if (owner[c] !== o) continue;
+      var a = G.chunkOff[c], e = G.chunkOff[c + 1];
+      ctx.moveTo(sx(G.chunkPts[a]), sy(G.chunkPts[a + 1]));
+      for (var j = a + 2; j < e; j += 2) ctx.lineTo(sx(G.chunkPts[j]), sy(G.chunkPts[j + 1]));
+    }
+  }
+
+  function draw() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.map; ctx.fillRect(0, 0, W, H);
+    if (!G) return;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    var w = Math.max(0.9, Math.min(8, view.k * 5));
+    ctx.lineWidth = w; ctx.strokeStyle = C.road; ctx.beginPath(); tracePath(-1); ctx.stroke();
+    ctx.lineWidth = Math.max(2.2, w * 1.5);
+    var o, i;
+    for (o = 0; o < 4; o++) { ctx.strokeStyle = C.runner[o]; ctx.beginPath(); tracePath(o); ctx.stroke(); }
+
+    for (i = 0; i < places.length; i++) drawLabel(places[i][0], sx(places[i][1]), sy(places[i][2]), 11, 600);
+    if (view.k > 0.2) for (i = 0; i < bridgeLabels.length; i++) drawLabel(bridgeLabels[i][0], sx(bridgeLabels[i][1]), sy(bridgeLabels[i][2]) - 9, 10, 500);
+
+    for (i = 0; i < 4; i++) {
+      var p = pos[i];
+      if (!p) continue;
+      var px = sx(p.x), py = sy(p.y), stale = (now() - p.t) / 1000 > 120;
+      ctx.globalAlpha = stale ? 0.4 : 1;
+      ctx.beginPath(); ctx.arc(px, py, 15, 0, Math.PI * 2);
+      ctx.fillStyle = C.runner[i]; ctx.globalAlpha = stale ? 0.1 : 0.22; ctx.fill();
+      ctx.globalAlpha = stale ? 0.4 : 1;
+      ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2);
+      ctx.fillStyle = C.runner[i]; ctx.fill();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = C.map; ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    var nice = [100, 200, 500, 1000, 2000], len = 100;
+    for (i = 0; i < nice.length; i++) { len = nice[i]; if (nice[i] * view.k >= 70) break; }
+    var bx = 16, by = H - 18, bl = len * view.k;
+    ctx.lineCap = 'butt'; ctx.lineWidth = 2; ctx.strokeStyle = C.label;
+    ctx.beginPath(); ctx.moveTo(bx, by - 4); ctx.lineTo(bx, by); ctx.lineTo(bx + bl, by); ctx.lineTo(bx + bl, by - 4); ctx.stroke();
+    ctx.font = '500 11px Barlow, system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillStyle = C.label; ctx.fillText(len >= 1000 ? (len / 1000) + ' km' : len + ' m', bx, by - 7);
+    ctx.textAlign = 'right';
+    ctx.fillText('© OpenStreetMap-Mitwirkende', W - 10, H - 8);
+  }
+
+  /* ---------- Zählertafel ---------- */
+  var list = document.getElementById('runners'), cards = [];
+  for (var i = 0; i < 4; i++) {
+    var li = document.createElement('li');
+    li.className = 'runner';
+    li.style.setProperty('--rc', 'var(--r' + i + ')');
+    li.innerHTML =
+      '<div class="top"><span class="sw"></span><input type="text" readonly tabindex="-1" aria-label="Name von Läufer ' + (i + 1) + '">' +
+      '<span class="rank"></span></div>' +
+      '<div class="m"><span class="mv">0</span><small>m</small></div>' +
+      '<div class="bar"><span></span></div><div class="pct"></div>';
+    list.appendChild(li);
+    cards.push({ li: li, nm: li.querySelector('input'), mv: li.querySelector('.mv'), bar: li.querySelector('.bar span'),
+      pct: li.querySelector('.pct'), rank: li.querySelector('.rank') });
+  }
+  var elClock = document.getElementById('clock'), elState = document.getElementById('state'),
+    elFree = document.getElementById('free'), elLive = document.getElementById('livetag'),
+    elLiveText = document.getElementById('livetext');
+
+  function fmtM(v) { return Math.round(v).toLocaleString('de-CH'); }
+  function fmtP(v) { return v.toLocaleString('de-CH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
+  function fmtT(s) {
+    s = Math.max(0, Math.floor(s));
+    var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), r = s % 60;
+    return h + ':' + (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+  }
+  function updateUI() {
+    if (!G) return;
+    var total = G.totalLen, claimed = meters[0] + meters[1] + meters[2] + meters[3];
+    var order = [0, 1, 2, 3].sort(function (a, b) { return meters[b] - meters[a]; });
+    var top = Math.max(meters[order[0]] / total * 100, 0.1);
+    for (var i = 0; i < 4; i++) {
+      var c = cards[i], share = meters[i] / total * 100;
+      if (c.nm.value !== runners[i].name) c.nm.value = runners[i].name;
+      c.mv.textContent = fmtM(meters[i]);
+      c.bar.style.width = Math.min(100, share / top * 100) + '%';
+      c.pct.textContent = fmtP(share) + ' % des Netzes';
+      c.rank.textContent = 'Platz ' + (order.indexOf(i) + 1);
+      c.li.classList.toggle('lead', order[0] === i && meters[i] > 0);
+    }
+    elFree.textContent = fmtM(total - claimed) + ' m';
+    var el = game.status === 'running' ? (now() - game.startedAt) / 1000
+      : game.status === 'ended' ? (game.endedAt - game.startedAt) / 1000 : 0;
+    elClock.textContent = fmtT(el);
+    if (game.status === 'waiting') elState.textContent = 'Wartet auf den Start';
+    else if (game.status === 'running') elState.textContent = 'Läuft';
+    else elState.textContent = 'Beendet · ' + runners[order[0]].name + ' gewinnt';
+    if (!connected) { elLiveText.textContent = 'Getrennt'; elLive.classList.remove('on'); }
+    else if (game.status === 'running') { elLiveText.textContent = 'Live'; elLive.classList.add('on'); }
+    else { elLiveText.textContent = game.status === 'ended' ? 'Beendet' : 'Bereit'; elLive.classList.remove('on'); }
+  }
+
+  /* ---------- Verbindung zum Server ---------- */
+  function applyInit(m) {
+    offset = m.now - Date.now(); delay = m.delay; game = m.game;
+    runners = m.runners; pos = [null, null, null, null];
+    m.pos.forEach(function (p) { pos[p.id] = p; });
+    owner.fill(-1); meters = [0, 0, 0, 0];
+    for (var i = 0; i < m.claims.length; i += 2) { owner[m.claims[i]] = m.claims[i + 1]; meters[m.claims[i + 1]] += G.chunkLen[m.claims[i]]; }
+    document.getElementById('delay').textContent = String(delay);
+  }
+  var retry = 1000;
+  function connect() {
+    var ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    ws.onopen = function () { retry = 1000; };
+    ws.onmessage = function (e) {
+      var m = JSON.parse(e.data);
+      if (m.type === 'init') { applyInit(m); connected = true; }
+      else if (m.type === 'claims') {
+        for (var i = 0; i < m.list.length; i += 2) {
+          var c = m.list[i], o = m.list[i + 1], prev = owner[c];
+          if (prev >= 0) meters[prev] -= G.chunkLen[c];
+          owner[c] = o; meters[o] += G.chunkLen[c];
+        }
+      } else if (m.type === 'pos') pos[m.id] = m;
+      dirty = true; updateUI();
+    };
+    ws.onclose = function () {
+      connected = false; dirty = true; updateUI();
+      setTimeout(connect, retry); retry = Math.min(retry * 2, 15000);
+    };
+    ws.onerror = function () { try { ws.close(); } catch (err) {} };
+  }
+
+  /* ---------- Zoom und Verschieben ---------- */
+  function zoomAt(px, py, f) {
+    var wx = (px - W / 2) / view.k + view.cx, wy = (H / 2 - py) / view.k + view.cy;
+    view.k = Math.max(kFit * 0.7, Math.min(kFit * 40, view.k * f));
+    view.cx = wx - (px - W / 2) / view.k; view.cy = wy + (py - H / 2) / view.k;
+    dirty = true;
+  }
+  document.getElementById('zin').addEventListener('click', function () { zoomAt(W / 2, H / 2, 1.6); });
+  document.getElementById('zout').addEventListener('click', function () { zoomAt(W / 2, H / 2, 1 / 1.6); });
+  document.getElementById('zfit').addEventListener('click', function () { if (G) fit(); });
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015));
+  }, { passive: false });
+  var pts = {}, lastDist = 0;
+  function ptList() { return Object.keys(pts).map(function (k) { return pts[k]; }); }
+  canvas.addEventListener('pointerdown', function (e) {
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    pts[e.pointerId] = { x: e.clientX, y: e.clientY }; lastDist = 0;
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!pts[e.pointerId]) return;
+    var prev = pts[e.pointerId], l = ptList();
+    if (l.length === 1) {
+      view.cx -= (e.clientX - prev.x) / view.k; view.cy += (e.clientY - prev.y) / view.k; dirty = true;
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+    } else if (l.length === 2) {
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var a = ptList(), dx = a[0].x - a[1].x, dy = a[0].y - a[1].y, d = Math.sqrt(dx * dx + dy * dy);
+      if (lastDist > 0) {
+        var r = canvas.getBoundingClientRect();
+        zoomAt((a[0].x + a[1].x) / 2 - r.left, (a[0].y + a[1].y) / 2 - r.top, d / lastDist);
+      }
+      lastDist = d;
+    }
+  });
+  function endPtr(e) { delete pts[e.pointerId]; lastDist = 0; }
+  canvas.addEventListener('pointerup', endPtr);
+  canvas.addEventListener('pointercancel', endPtr);
+
+  /* ---------- Start ---------- */
+  refreshColors();
+  try {
+    new MutationObserver(refreshColors).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', refreshColors);
+  } catch (err) {}
+  resize();
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas); else window.addEventListener('resize', resize);
+
+  fetch('/network.json').then(function (r) { return r.json(); }).then(function (NET) {
+    G = NetBuild.build(NET, 40);
+    owner = new Int8Array(G.totalChunks).fill(-1);
+    var KX = 111320 * Math.cos(NET.origin[0] * Math.PI / 180), KY = 110540;
+    places = PLACES.map(function (p) { return [p[0], (p[2] - NET.origin[1]) * KX, (p[1] - NET.origin[0]) * KY]; });
+    Object.keys(NET.bridgeNames).forEach(function (n) {
+      if (/brücke/i.test(n)) bridgeLabels.push([n, NET.bridgeNames[n][0], NET.bridgeNames[n][1]]);
+    });
+    document.getElementById('netinfo').textContent = (G.totalLen / 1000).toLocaleString('de-CH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) +
+      ' km in ' + G.totalChunks.toLocaleString('de-CH') + ' Abschnitten';
+    resize();
+    connect();
+    dirty = true; updateUI();
+  });
+
+  setInterval(function () { dirty = true; updateUI(); }, 1000);
+  function frame() { if (dirty) { draw(); dirty = false; } requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
